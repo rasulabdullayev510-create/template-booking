@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const adapter = new FileSync("db.json");
 const db = low(adapter);
-db.defaults({ bookings: [], feedback: [], walkins: [] }).write();
+db.defaults({ bookings: [], feedback: [], walkins: [], pageviews: [] }).write();
 
 const {
   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER,
@@ -86,6 +86,60 @@ async function sendReviewSMS(phone, customerName, token) {
 
 app.get("/api/info", (req, res) => {
   res.json({ businessName: BUSINESS_NAME, googleReviewLink: GOOGLE_REVIEW });
+});
+
+// Website visit tracking
+app.post("/api/track", (req, res) => {
+  const { page } = req.body;
+  db.get("pageviews").push({
+    page: page || "unknown",
+    date: new Date().toISOString().split("T")[0],
+    ts: new Date().toISOString(),
+  }).write();
+  res.json({ ok: true });
+});
+
+app.get("/api/stats", (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  const pageviews = db.get("pageviews").value();
+  const bookings  = db.get("bookings").value();
+  const walkins   = db.get("walkins").value();
+  const feedback  = db.get("feedback").value();
+  const confirmed = bookings.filter(b => b.status === "confirmed");
+
+  // Last 30 days views by day
+  const last30 = {};
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    last30[d.toISOString().split("T")[0]] = 0;
+  }
+  pageviews.forEach(v => { if (last30[v.date] !== undefined) last30[v.date]++; });
+
+  // Upcoming bookings (next 14 days, confirmed)
+  const today = new Date().toISOString().split("T")[0];
+  const upcoming = confirmed
+    .filter(b => b.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+    .slice(0, 20);
+
+  const totalViews = pageviews.length;
+  const homeViews  = pageviews.filter(v => v.page === "home").length;
+  const convRate   = homeViews ? ((confirmed.length / homeViews) * 100).toFixed(1) : "0.0";
+
+  const revenue = confirmed.reduce((s, b) => s + b.servicePrice, 0);
+  const avgRating = feedback.length
+    ? (feedback.reduce((s, f) => s + f.rating, 0) / feedback.length).toFixed(1) : null;
+
+  res.json({
+    totalViews, homeViews, convRate,
+    totalBookings: confirmed.length,
+    totalRevenue: revenue,
+    avgRating,
+    reviewRate: confirmed.length ? Math.round((feedback.length / confirmed.length) * 100) : 0,
+    totalWalkins: walkins.length,
+    viewsByDay: last30,
+    upcoming,
+  });
 });
 
 app.get("/api/services", (req, res) => res.json(SERVICES));
