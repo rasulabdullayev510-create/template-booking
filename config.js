@@ -5,69 +5,69 @@
 module.exports = {
 
   // --- Business info ---
-  businessName:     "Prestige Barbershop",
+  businessName:     "Apex Auto Detailing",
   bookingPageUrl:   "https://template-booking.onrender.com",
-  googleReviewLink: "https://g.page/prestige-barbershop-calgary",
+  googleReviewLink: "https://g.page/apex-auto-detailing-calgary",
 
   // --- Operating hours ---
   // startHour / endHour are 24h format integers (9 = 9am, 17 = 5pm)
   // closedDays: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
   hours: {
-    default:     { startHour: 9,  endHour: 19 },  // Mon–Fri
-    friday:      { startHour: 9,  endHour: 19 },  // Friday
-    weekend:     { startHour: 9,  endHour: 18 },  // Sat, Sun 11–4
+    default:     { startHour: 8,  endHour: 18 },  // Mon–Fri
+    friday:      { startHour: 8,  endHour: 18 },  // Friday
+    weekend:     { startHour: 8,  endHour: 17 },  // Sat (Sun opens at 10 but server uses startHour)
     closedDays:  [],
   },
 
   // --- Services shown on booking page ---
   services: [
     {
-      id:          "haircut",
-      name:        "Haircut",
-      description: "Classic or modern cut with hot towel finish and style.",
-      duration:    30,
-      price:       35,
-      category:   "cut",
+      id:          "full-detail",
+      name:        "Full Detail",
+      description: "Complete interior + exterior. Vacuum, shampoo, clay bar, wax.",
+      duration:    240,
+      price:       200,
+      category:   "package",
     },
     {
-      id:          "skin-fade",
-      name:        "Skin Fade",
-      description: "Zero to skin, blended clean. Our most popular cut.",
-      duration:    40,
-      price:       40,
-      category:   "cut",
+      id:          "interior-detail",
+      name:        "Interior Detail",
+      description: "Deep vacuum, steam clean, leather condition, full wipe-down.",
+      duration:    150,
+      price:       120,
+      category:   "package",
     },
     {
-      id:          "beard-trim",
-      name:        "Beard Trim & Shape",
-      description: "Crisp lines and defined edges shaped to your face.",
-      duration:    20,
-      price:       25,
-      category:   "beard",
+      id:          "exterior-wash-wax",
+      name:        "Exterior Wash & Wax",
+      description: "Hand wash, clay bar, and carnauba wax. Showroom shine.",
+      duration:    120,
+      price:       100,
+      category:   "package",
     },
     {
-      id:          "hot-towel-shave",
-      name:        "Hot Towel Shave",
-      description: "Full straight razor shave with hot towel prep.",
-      duration:    40,
-      price:       40,
-      category:   "shave",
+      id:          "paint-correction-1",
+      name:        "Paint Correction (1-Stage)",
+      description: "Machine polish to remove swirl marks and light scratches.",
+      duration:    240,
+      price:       250,
+      category:   "paint",
     },
     {
-      id:          "kids-cut",
-      name:        "Kids Cut",
-      description: "Patient and friendly. For boys 12 and under.",
-      duration:    25,
-      price:       25,
-      category:   "cut",
+      id:          "ceramic-coating",
+      name:        "Ceramic Coating",
+      description: "Long-term paint protection. Repels water, dirt, and UV.",
+      duration:    300,
+      price:       600,
+      category:   "protection",
     },
     {
-      id:          "combo",
-      name:        "Cut + Beard Combo",
-      description: "Full haircut and beard service — best value in the shop.",
-      duration:    55,
-      price:       55,
-      category:   "combo",
+      id:          "engine-bay",
+      name:        "Engine Bay Clean",
+      description: "Safe degreasing and detailing of your engine bay.",
+      duration:    90,
+      price:       80,
+      category:   "addon",
     },
   ],
 
