@@ -93,6 +93,7 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
 .slot:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-light)}
 .slot.picked{background:var(--primary);border-color:var(--primary);color:#fff}
 .slot.booked{opacity:0.3;cursor:not-allowed;text-decoration:line-through;pointer-events:none}
+.slot.blocked{opacity:0.3;cursor:not-allowed;text-decoration:line-through;pointer-events:none;background:var(--bg)}
 .no-slot{font-size:13px;color:var(--ink3);padding:20px 0;line-height:1.7;text-align:center}
 
 /* ── Summary bar (above datetime step) ── */
@@ -388,6 +389,8 @@ function renderSlots(slots){
     var s=slots[i];
     if(s.status==='booked'){
       html+='<div class="slot booked">'+fmt12(s.time)+'</div>';
+    }else if(s.status==='blocked'){
+      html+='<div class="slot blocked">'+fmt12(s.time)+'</div>';
     }else{
       var picked=sel.time===s.time?' picked':'';
       html+='<div class="slot'+picked+'" onclick="pickSlot(\''+s.time+'\')">'+fmt12(s.time)+'</div>';

@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const adapter = new FileSync("db.json");
 const db = low(adapter);
-db.defaults({ bookings: [], feedback: [], walkins: [], pageviews: [] }).write();
+db.defaults({ bookings: [], feedback: [], walkins: [], pageviews: [], blocked: [] }).write();
 
 const {
   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER,
@@ -55,31 +55,26 @@ async function sendSMS(to, body) {
 async function sendOwnerRequest(booking) {
   if (!OWNER_PHONE) return;
   await sendSMS(OWNER_PHONE,
-    `New booking request!\n${booking.customerName} wants ${booking.serviceName}\n${booking.date} at ${formatTime(booking.time)}\nPhone: ${booking.phone}\n\nReply YES to confirm or NO to decline.`
+    `New booking — ClearVision!\n${booking.customerName} booked ${booking.serviceName}\n${booking.date} at ${formatTime(booking.time)}\nPhone: ${booking.phone}\n\nReply YES to confirm or NO to decline.`
   );
 }
 
 async function sendCustomerConfirmation(booking) {
   await sendSMS(booking.phone,
-    `Hi ${booking.customerName}! Your booking is confirmed at ${BUSINESS_NAME}. ${booking.serviceName} on ${booking.date} at ${formatTime(booking.time)}. See you then!`
+    `Hey ${booking.customerName}! Your ${booking.serviceName} is confirmed with ClearVision Auto. We'll come to you on ${booking.date} at ${formatTime(booking.time)}. See you then! — ClearVision`
   );
 }
 
 async function sendCustomerDenied(booking) {
   await sendSMS(booking.phone,
-    `Hi ${booking.customerName}, unfortunately that time is no longer available at ${BUSINESS_NAME}. Please choose another time: ${BOOKING_PAGE_URL}/book`
+    `Hey ${booking.customerName}, unfortunately that time slot is taken. Pick another time here and we'll get you booked: ${BOOKING_PAGE_URL}/book — ClearVision Auto`
   );
 }
 
-async function sendCustomerOffer(booking, suggestedDate, suggestedTime) {
-  await sendSMS(booking.phone,
-    `Hi ${booking.customerName}! That time isn't available. Would ${suggestedDate} at ${formatTime(suggestedTime)} work instead?\n\nReply YES to confirm or NO to decline.`
-  );
-}
 
 async function sendReviewSMS(phone, customerName, token) {
   await sendSMS(phone,
-    `Hi ${customerName}! How was your experience at ${BUSINESS_NAME}? Takes 20 seconds: ${getSurveyUrl(token)}`
+    `Hey ${customerName}! Hope those headlights are looking crystal clear 💡 Would mean a lot if you took 20 seconds to let us know how we did: ${getSurveyUrl(token)} — ClearVision Auto`
   );
 }
 
@@ -168,6 +163,12 @@ app.get("/api/availability", (req, res) => {
     .filter(b => b.date === date && b.status !== "cancelled" && b.status !== "denied")
     .map(b => b.time).value();
 
+  const blockedEntries = db.get("blocked").value();
+  const dayBlocked = blockedEntries.some(b => b.date === date && !b.time);
+  const blockedTimes = blockedEntries.filter(b => b.date === date && b.time).map(b => b.time);
+
+  if (dayBlocked) return res.json({ date, slots: [], dayBlocked: true });
+
   const slots = [];
   for (let hr = startH; hr <= endH; hr++) {
     for (let m of [0, 30]) {
@@ -177,7 +178,10 @@ app.get("/api/availability", (req, res) => {
         const slotTime = new Date(date + "T" + timeStr + ":00");
         if (slotTime < oneHourFromNow) continue;
       }
-      slots.push({ time: timeStr, status: booked.includes(timeStr) ? "booked" : "available" });
+      let status = "available";
+      if (booked.includes(timeStr)) status = "booked";
+      else if (blockedTimes.includes(timeStr)) status = "blocked";
+      slots.push({ time: timeStr, status });
     }
   }
   res.json({ date, slots });
@@ -253,76 +257,48 @@ app.get("/api/walkins", (req, res) => {
 // ── SMS webhook ───────────────────────────────────────────────
 
 app.post("/api/sms-webhook", async (req, res) => {
-  const from = req.body.From;
-  const bodyRaw = (req.body.Body || "").trim();
-  const body = bodyRaw.toUpperCase();
-
+  const from    = req.body.From;
+  const body    = (req.body.Body || "").trim().toUpperCase();
   const ownerNorm = (OWNER_PHONE || "").replace(/[^0-9]/g, "");
   const fromNorm  = (from || "").replace(/[^0-9]/g, "");
   const isOwner   = ownerNorm && fromNorm.endsWith(ownerNorm.slice(-10));
 
   if (isOwner) {
-    const pendingBooking = db.get("bookings").filter({ status: "pending" }).sortBy("createdAt").last().value();
-    const awaitingOffer  = db.get("bookings").filter({ status: "denied_awaiting_offer" }).sortBy("createdAt").last().value();
-    const dateTimeMatch  = bodyRaw.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
-
-    if (body === "YES" && pendingBooking) {
-      db.get("bookings").find({ id: pendingBooking.id }).assign({ status: "confirmed" }).write();
-      try { await sendCustomerConfirmation(pendingBooking); }
-      catch (err) { console.error(err.message); }
-
-    } else if (body === "NO" && pendingBooking) {
-      db.get("bookings").find({ id: pendingBooking.id }).assign({ status: "denied_awaiting_offer" }).write();
-      try {
-        await sendSMS(OWNER_PHONE,
-          `Declined ${pendingBooking.customerName}. Suggest a new time?\n\nReply with date+time like:\n03/29 14:00\n\nOr reply SKIP to send them a rebook link.`
-        );
-      } catch (err) { console.error(err.message); }
-
-    } else if (body === "SKIP" && awaitingOffer) {
-      db.get("bookings").find({ id: awaitingOffer.id }).assign({ status: "denied" }).write();
-      try { await sendCustomerDenied(awaitingOffer); }
-      catch (err) { console.error(err.message); }
-
-    } else if (dateTimeMatch && awaitingOffer) {
-      const now = new Date();
-      const suggestedDate = `${now.getFullYear()}-${dateTimeMatch[1].padStart(2,"0")}-${dateTimeMatch[2].padStart(2,"0")}`;
-      const suggestedTime = `${dateTimeMatch[3].padStart(2,"0")}:${dateTimeMatch[4]}`;
-      db.get("bookings").find({ id: awaitingOffer.id }).assign({ status: "offer_sent", suggestedDate, suggestedTime }).write();
-      try { await sendCustomerOffer(awaitingOffer, suggestedDate, suggestedTime); }
-      catch (err) { console.error(err.message); }
-    }
-
-  } else {
-    const fromN = (from || "").replace(/[^0-9]/g, "");
-    const allOffers = db.get("bookings").filter(b => b.status === "offer_sent").value();
-    const offerBooking = allOffers.find(b => (b.phone || "").replace(/[^0-9]/g, "").endsWith(fromN.slice(-10)));
-
-    if (offerBooking) {
-      if (body === "YES") {
-        const taken = db.get("bookings")
-          .find(b => b.date === offerBooking.suggestedDate && b.time === offerBooking.suggestedTime
-            && b.status !== "cancelled" && b.status !== "denied" && b.id !== offerBooking.id)
-          .value();
-        if (taken) {
-          db.get("bookings").find({ id: offerBooking.id }).assign({ status: "denied" }).write();
-          try { await sendSMS(offerBooking.phone, `Sorry ${offerBooking.customerName}, that time just got taken. Please rebook: ${BOOKING_PAGE_URL}/book`); }
-          catch (err) { console.error(err.message); }
-        } else {
-          db.get("bookings").find({ id: offerBooking.id }).assign({ status: "confirmed", date: offerBooking.suggestedDate, time: offerBooking.suggestedTime }).write();
-          const updated = db.get("bookings").find({ id: offerBooking.id }).value();
-          try { await sendCustomerConfirmation(updated); }
-          catch (err) { console.error(err.message); }
-        }
-      } else if (body === "NO") {
-        db.get("bookings").find({ id: offerBooking.id }).assign({ status: "denied" }).write();
-        try { await sendSMS(offerBooking.phone, `No problem ${offerBooking.customerName}! Give us a call and we'll find a time that works.`); }
-        catch (err) { console.error(err.message); }
-      }
+    const pending = db.get("bookings").filter({ status: "pending" }).sortBy("createdAt").last().value();
+    if (body === "YES" && pending) {
+      db.get("bookings").find({ id: pending.id }).assign({ status: "confirmed" }).write();
+      try { await sendCustomerConfirmation(pending); } catch (err) { console.error(err.message); }
+    } else if (body === "NO" && pending) {
+      db.get("bookings").find({ id: pending.id }).assign({ status: "denied" }).write();
+      try { await sendCustomerDenied(pending); } catch (err) { console.error(err.message); }
     }
   }
 
   res.set("Content-Type", "text/xml").send("<Response></Response>");
+});
+
+// ── Blocked slots ─────────────────────────────────────────────
+
+app.get("/api/blocked", (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  res.json(db.get("blocked").value());
+});
+
+app.post("/api/blocked", (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  const { date, time } = req.body; // time is optional — omit to block full day
+  if (!date) return res.status(400).json({ error: "date required" });
+  const exists = db.get("blocked").find(time ? { date, time } : b => b.date === date && !b.time).value();
+  if (!exists) db.get("blocked").push({ date, time: time || null }).write();
+  res.json({ success: true });
+});
+
+app.delete("/api/blocked", (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  const { date, time } = req.body;
+  if (!date) return res.status(400).json({ error: "date required" });
+  db.get("blocked").remove(time ? { date, time } : b => b.date === date && !b.time).write();
+  res.json({ success: true });
 });
 
 // ── Review endpoints ──────────────────────────────────────────
