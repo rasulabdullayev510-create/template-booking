@@ -275,6 +275,59 @@ app.delete("/api/blocked", (req, res) => {
   res.json({ success: true });
 });
 
+app.post("/api/blocked/range", (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  const { date, startTime, endTime } = req.body;
+  if (!date || !startTime || !endTime) return res.status(400).json({ error: "date, startTime, endTime required" });
+  const [startH, startM] = startTime.split(":").map(Number);
+  const [endH,   endM]   = endTime.split(":").map(Number);
+  const startMins = startH * 60 + startM;
+  const endMins   = endH   * 60 + endM;
+  for (let mins = startMins; mins < endMins; mins += 30) {
+    const h = String(Math.floor(mins / 60)).padStart(2, "0");
+    const m = String(mins % 60).padStart(2, "0");
+    const time = `${h}:${m}`;
+    const exists = db.get("blocked").find({ date, time }).value();
+    if (!exists) db.get("blocked").push({ date, time }).write();
+  }
+  res.json({ success: true });
+});
+
+// ── Manual entry (off-platform bookings) ─────────────────────
+
+app.post("/api/manual-entry", async (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  const { customerName, serviceName, servicePrice, date, notes } = req.body;
+  let phone = (req.body.phone || "").toString().replace(/[^0-9+]/g, "");
+  if (phone.length === 10) phone = "+1" + phone;
+  else if (phone.length === 11 && phone[0] === "1") phone = "+" + phone;
+  else if (phone.length > 0 && !phone.startsWith("+")) phone = "+" + phone;
+  if (!customerName || !serviceName) return res.status(400).json({ error: "Name and service required" });
+
+  const entry = {
+    id: `ME-${Date.now()}`, shortId: generateShortId(),
+    serviceId: "manual", serviceName,
+    servicePrice: Number(servicePrice) || 0,
+    date: date || new Date().toISOString().split("T")[0],
+    time: "00:00",
+    customerName, phone: phone || null,
+    email: null, notes: notes || null,
+    status: "confirmed",
+    source: "manual",
+    reviewToken: generateToken(), reviewSentAt: null,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.get("bookings").push(entry).write();
+
+  if (phone) {
+    try { await sendReviewSMS(phone, customerName, entry.reviewToken); entry.reviewSentAt = new Date().toISOString(); db.get("bookings").find({ id: entry.id }).assign({ reviewSentAt: entry.reviewSentAt }).write(); }
+    catch (err) { console.error(`✗ Review SMS:`, err.message); }
+  }
+
+  res.json({ success: true, id: entry.id });
+});
+
 // ── Review endpoints ──────────────────────────────────────────
 
 app.get("/api/bookings", (req, res) => {
