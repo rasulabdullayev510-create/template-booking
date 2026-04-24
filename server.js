@@ -52,22 +52,16 @@ async function sendSMS(to, body) {
   await twilioClient.messages.create({ body, from: TWILIO_PHONE_NUMBER, to });
 }
 
-async function sendOwnerRequest(booking) {
+async function sendOwnerNotification(booking) {
   if (!OWNER_PHONE) return;
   await sendSMS(OWNER_PHONE,
-    `New booking — ClearVision!\n${booking.customerName} booked ${booking.serviceName}\n${booking.date} at ${formatTime(booking.time)}\nPhone: ${booking.phone}\n\nReply YES to confirm or NO to decline.`
+    `New booking confirmed — ClearVision!\n${booking.customerName} — ${booking.serviceName}\n${booking.date} at ${formatTime(booking.time)}\nPhone: ${booking.phone}`
   );
 }
 
 async function sendCustomerConfirmation(booking) {
   await sendSMS(booking.phone,
     `Hey ${booking.customerName}! Your ${booking.serviceName} is confirmed with ClearVision Auto. We'll come to you on ${booking.date} at ${formatTime(booking.time)}. See you then! — ClearVision`
-  );
-}
-
-async function sendCustomerDenied(booking) {
-  await sendSMS(booking.phone,
-    `Hey ${booking.customerName}, unfortunately that time slot is taken. Pick another time here and we'll get you booked: ${BOOKING_PAGE_URL}/book — ClearVision Auto`
   );
 }
 
@@ -207,7 +201,7 @@ app.post("/api/bookings", async (req, res) => {
     servicePrice: Number(servicePrice) || 0,
     date, time, customerName, phone,
     email: email || null, notes: notes || null,
-    status: "pending",
+    status: "confirmed",
     reviewToken: generateToken(), reviewSentAt: null,
     createdAt: new Date().toISOString(),
   };
@@ -215,8 +209,8 @@ app.post("/api/bookings", async (req, res) => {
   db.get("bookings").push(booking).write();
   console.log(`✓ Booking: ${booking.id} — ${customerName} for ${booking.serviceName} on ${date} at ${time}`);
 
-  try { await sendOwnerRequest(booking); }
-  catch (err) { console.error(`✗ Owner SMS:`, err.message); }
+  try { await sendCustomerConfirmation(booking); } catch (err) { console.error(`✗ Customer SMS:`, err.message); }
+  try { await sendOwnerNotification(booking); }    catch (err) { console.error(`✗ Owner SMS:`, err.message); }
 
   res.json({
     success: true, bookingId: booking.id,
@@ -256,26 +250,6 @@ app.get("/api/walkins", (req, res) => {
 
 // ── SMS webhook ───────────────────────────────────────────────
 
-app.post("/api/sms-webhook", async (req, res) => {
-  const from    = req.body.From;
-  const body    = (req.body.Body || "").trim().toUpperCase();
-  const ownerNorm = (OWNER_PHONE || "").replace(/[^0-9]/g, "");
-  const fromNorm  = (from || "").replace(/[^0-9]/g, "");
-  const isOwner   = ownerNorm && fromNorm.endsWith(ownerNorm.slice(-10));
-
-  if (isOwner) {
-    const pending = db.get("bookings").filter({ status: "pending" }).sortBy("createdAt").last().value();
-    if (body === "YES" && pending) {
-      db.get("bookings").find({ id: pending.id }).assign({ status: "confirmed" }).write();
-      try { await sendCustomerConfirmation(pending); } catch (err) { console.error(err.message); }
-    } else if (body === "NO" && pending) {
-      db.get("bookings").find({ id: pending.id }).assign({ status: "denied" }).write();
-      try { await sendCustomerDenied(pending); } catch (err) { console.error(err.message); }
-    }
-  }
-
-  res.set("Content-Type", "text/xml").send("<Response></Response>");
-});
 
 // ── Blocked slots ─────────────────────────────────────────────
 
