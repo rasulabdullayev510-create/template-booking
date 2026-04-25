@@ -322,6 +322,7 @@ app.post("/api/blocked/range", (req, res) => {
 app.post("/api/manual-entry", async (req, res) => {
   if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
   const { customerName, serviceName, servicePrice, date, notes } = req.body;
+  const reviewDelayMinutes = req.body.reviewDelayMinutes !== undefined ? Number(req.body.reviewDelayMinutes) : 720;
   let phone = (req.body.phone || "").toString().replace(/[^0-9+]/g, "");
   if (phone.length === 10) phone = "+1" + phone;
   else if (phone.length === 11 && phone[0] === "1") phone = "+" + phone;
@@ -338,12 +339,21 @@ app.post("/api/manual-entry", async (req, res) => {
     email: null, notes: notes || null,
     status: "confirmed",
     source: "manual",
+    reviewDelayMinutes,
     reviewToken: generateToken(), reviewSentAt: null,
     createdAt: new Date().toISOString(),
   };
 
   db.get("bookings").push(entry).write();
-  // Review SMS fires automatically via cron 12 hours after createdAt
+
+  // If delay is 0, fire immediately
+  if (reviewDelayMinutes === 0 && phone) {
+    try {
+      await sendReviewSMS(phone, customerName, entry.reviewToken);
+      db.get("bookings").find({ id: entry.id }).assign({ reviewSentAt: new Date().toISOString() }).write();
+    } catch(err) { console.error("✗ Immediate review SMS:", err.message); }
+  }
+  // Otherwise cron picks it up after reviewDelayMinutes
 
   res.json({ success: true, id: entry.id });
 });
@@ -432,13 +442,13 @@ app.get("*",          (req, res) => res.sendFile(path.join(__dirname, "public", 
 cron.schedule("* * * * *", async () => {
   const now = new Date();
 
-  const MANUAL_REVIEW_DELAY_MIN = 720; // 12 hours for manual entries
-
   // Confirmed bookings
   const pendingBookings = db.get("bookings").filter(b => {
     if (b.status !== "confirmed" || b.reviewSentAt || !b.phone) return false;
     if (b.source === "manual") {
-      return (now - new Date(b.createdAt)) / (1000 * 60) >= MANUAL_REVIEW_DELAY_MIN;
+      const delayMin = b.reviewDelayMinutes > 0 ? b.reviewDelayMinutes : null;
+      if (!delayMin) return false; // delay=0 already fired immediately
+      return (now - new Date(b.createdAt)) / (1000 * 60) >= delayMin;
     }
     const apptTime = new Date(new Date(`${b.date}T${b.time}:00`).toLocaleString("en-US", { timeZone: TIMEZONE }));
     return (now - apptTime) / (1000 * 60) >= REVIEW_DELAY_MIN;
