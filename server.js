@@ -25,6 +25,9 @@ const {
   PORT = 3000,
   ADMIN_PASSWORD = "admin2024",
   OWNER_PHONE,
+  OWNER_EMAIL,
+  SMTP_USER,
+  SMTP_PASS,
 } = process.env;
 
 const BUSINESS_NAME    = CONFIG.businessName;
@@ -37,7 +40,7 @@ const TIMEZONE         = CONFIG.timezone || "America/Edmonton";
 
 const twilioClient = TWILIO_ACCOUNT_SID ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
 
-function generateToken() { return crypto.randomBytes(16).toString("hex"); }
+function generateToken() { return crypto.randomBytes(6).toString("hex"); }
 function generateShortId() { return crypto.randomBytes(3).toString("hex").toUpperCase(); }
 function getSurveyUrl(token) { return `${BOOKING_PAGE_URL}/review?token=${token}`; }
 
@@ -55,14 +58,33 @@ async function sendSMS(to, body) {
 async function sendOwnerNotification(booking) {
   if (!OWNER_PHONE) return;
   await sendSMS(OWNER_PHONE,
-    `New booking confirmed — ClearVision!\n${booking.customerName} — ${booking.serviceName}\n${booking.date} at ${formatTime(booking.time)}\nPhone: ${booking.phone}`
+    `${booking.customerName} booked an appointment for ${booking.serviceName} on ${booking.date} at ${formatTime(booking.time)}.`
   );
 }
 
 async function sendCustomerConfirmation(booking) {
+  const firstName = booking.customerName.split(" ")[0];
   await sendSMS(booking.phone,
-    `Hey ${booking.customerName}! Your ${booking.serviceName} is confirmed with ClearVision Auto. We'll come to you on ${booking.date} at ${formatTime(booking.time)}. See you then! — ClearVision`
+    `Hey ${firstName}! Your ${booking.serviceName} is confirmed with ${BUSINESS_NAME}. We'll see you on ${booking.date} at ${formatTime(booking.time)}. — ${BUSINESS_NAME}`
   );
+}
+
+async function sendOwnerFeedbackAlert(feedbackEntry, record) {
+  const msg = `⚠️ Private feedback from ${record.customerName} — ${feedbackEntry.rating}★\nService: ${record.serviceName}\n${feedbackEntry.comment ? `"${feedbackEntry.comment}"` : "No comment."}`;
+  if (OWNER_PHONE) {
+    try { await sendSMS(OWNER_PHONE, msg); } catch(e) { console.error("Owner feedback SMS error:", e.message); }
+  }
+  if (OWNER_EMAIL && SMTP_USER && SMTP_PASS) {
+    try {
+      const nodemailer = require("nodemailer");
+      const transporter = nodemailer.createTransport({ service: "gmail", auth: { user: SMTP_USER, pass: SMTP_PASS } });
+      await transporter.sendMail({
+        from: SMTP_USER, to: OWNER_EMAIL,
+        subject: `Private feedback — ${feedbackEntry.rating}★ from ${record.customerName}`,
+        text: `Customer: ${record.customerName}\nService: ${record.serviceName}\nRating: ${feedbackEntry.rating}/5\n\n${feedbackEntry.comment || "No comment left."}`,
+      });
+    } catch(e) { console.error("Owner feedback email error:", e.message); }
+  }
 }
 
 
@@ -138,6 +160,9 @@ app.get("/api/availability", (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: "date required" });
 
+  const todayStr = new Date().toISOString().split("T")[0];
+  if (date < todayStr) return res.json({ date, slots: [] });
+
   const d = new Date(date);
   const day = d.getDay();
   const closed = (HOURS.closedDays || []).includes(day);
@@ -151,7 +176,6 @@ app.get("/api/availability", (req, res) => {
   const startH = h.startHour, endH = h.endHour;
   const now = new Date();
   const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-  const todayStr = now.toISOString().split("T")[0];
 
   const booked = db.get("bookings")
     .filter(b => b.date === date && b.status !== "cancelled" && b.status !== "denied")
@@ -283,7 +307,7 @@ app.post("/api/blocked/range", (req, res) => {
   const [endH,   endM]   = endTime.split(":").map(Number);
   const startMins = startH * 60 + startM;
   const endMins   = endH   * 60 + endM;
-  for (let mins = startMins; mins < endMins; mins += 30) {
+  for (let mins = startMins; mins <= endMins; mins += 30) {
     const h = String(Math.floor(mins / 60)).padStart(2, "0");
     const m = String(mins % 60).padStart(2, "0");
     const time = `${h}:${m}`;
@@ -319,11 +343,7 @@ app.post("/api/manual-entry", async (req, res) => {
   };
 
   db.get("bookings").push(entry).write();
-
-  if (phone) {
-    try { await sendReviewSMS(phone, customerName, entry.reviewToken); entry.reviewSentAt = new Date().toISOString(); db.get("bookings").find({ id: entry.id }).assign({ reviewSentAt: entry.reviewSentAt }).write(); }
-    catch (err) { console.error(`✗ Review SMS:`, err.message); }
-  }
+  // Review SMS fires automatically via cron 12 hours after createdAt
 
   res.json({ success: true, id: entry.id });
 });
@@ -345,7 +365,7 @@ app.post("/api/review", (req, res) => {
   const record  = booking || walkin;
   if (!record) return res.status(404).json({ error: "Invalid token" });
 
-  db.get("feedback").push({
+  const feedbackEntry = {
     id: Date.now(),
     source: booking ? "booking" : "walkin",
     sourceId: record.id,
@@ -353,9 +373,15 @@ app.post("/api/review", (req, res) => {
     serviceName: record.serviceName,
     rating: Number(rating), comment: comment || null,
     submittedAt: new Date().toISOString(),
-  }).write();
+  };
+  db.get("feedback").push(feedbackEntry).write();
 
-  res.json({ success: true, redirectToGoogle: Number(rating) >= 4 });
+  const isHigh = Number(rating) >= 4;
+  if (!isHigh) {
+    try { await sendOwnerFeedbackAlert(feedbackEntry, record); } catch(e) {}
+  }
+
+  res.json({ success: true, redirectToGoogle: isHigh, googleReviewLink: isHigh ? GOOGLE_REVIEW : null });
 });
 
 app.get("/api/feedback", (req, res) => {
@@ -406,9 +432,14 @@ app.get("*",          (req, res) => res.sendFile(path.join(__dirname, "public", 
 cron.schedule("* * * * *", async () => {
   const now = new Date();
 
+  const MANUAL_REVIEW_DELAY_MIN = 720; // 12 hours for manual entries
+
   // Confirmed bookings
   const pendingBookings = db.get("bookings").filter(b => {
-    if (b.status !== "confirmed" || b.reviewSentAt) return false;
+    if (b.status !== "confirmed" || b.reviewSentAt || !b.phone) return false;
+    if (b.source === "manual") {
+      return (now - new Date(b.createdAt)) / (1000 * 60) >= MANUAL_REVIEW_DELAY_MIN;
+    }
     const apptTime = new Date(new Date(`${b.date}T${b.time}:00`).toLocaleString("en-US", { timeZone: TIMEZONE }));
     return (now - apptTime) / (1000 * 60) >= REVIEW_DELAY_MIN;
   }).value();
