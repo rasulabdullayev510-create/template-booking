@@ -102,6 +102,15 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
 .sel-bar-price{font-size:18px;font-weight:800;color:var(--primary)}
 .sel-bar-dur{font-size:12px;color:var(--ink2);margin-top:2px}
 
+/* ── Service type ── */
+.type-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.type-opt{border:2px solid var(--border);border-radius:var(--radius);padding:18px 12px;text-align:center;cursor:pointer;transition:all 0.15s;background:var(--white)}
+.type-opt:hover{border-color:var(--primary-mid);background:var(--primary-light)}
+.type-opt.sel{border-color:var(--primary);background:var(--primary-light);box-shadow:0 0 0 3px rgba(13,148,136,0.1)}
+.type-opt-emoji{font-size:28px;margin-bottom:6px}
+.type-opt-label{font-size:14px;font-weight:700;color:var(--ink)}
+.type-opt-sub{font-size:12px;color:var(--ink3);margin-top:2px}
+
 /* ── Details form ── */
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .form-full{grid-column:1/-1}
@@ -260,9 +269,22 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
       <p class="panel-sub">We'll send a confirmation text straight to your phone.</p>
     </div>
     <div class="detail-summary" id="detail-summary"></div>
+    <div class="type-grid">
+      <div class="type-opt sel" id="type-inshop" onclick="pickType('inshop')">
+        <div class="type-opt-emoji">📍</div>
+        <div class="type-opt-label">In-Shop</div>
+        <div class="type-opt-sub">Drop off your vehicle</div>
+      </div>
+      <div class="type-opt" id="type-mobile" onclick="pickType('mobile')">
+        <div class="type-opt-emoji">🚗</div>
+        <div class="type-opt-label">Mobile</div>
+        <div class="type-opt-sub">We come to you</div>
+      </div>
+    </div>
     <div class="form-grid">
       <div class="field"><label>Full Name *</label><input type="text" id="inp-name" placeholder="Alex Johnson" autocomplete="name"/></div>
       <div class="field"><label>Phone Number *</label><input type="tel" id="inp-phone" placeholder="+1 (403) 555-0123" autocomplete="tel" inputmode="tel"/></div>
+      <div class="field form-full" id="address-field" style="display:none"><label>Your Address *</label><input type="text" id="inp-address" placeholder="123 Main St, Calgary, AB" autocomplete="street-address"/></div>
       <div class="field form-full"><label>Email (optional)</label><input type="email" id="inp-email" placeholder="alex@email.com" autocomplete="email"/></div>
       <div class="field form-full"><label>Notes</label><textarea id="inp-notes" placeholder="Anything we should know..."></textarea></div>
     </div>
@@ -290,7 +312,7 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
 
 <script>
 const API = window.location.origin;
-let services = [], sel = { service:null, date:null, time:null };
+let services = [], sel = { service:null, date:null, time:null, serviceType:'inshop' };
 let calMo = new Date(); calMo.setDate(1);
 
 fetch(API + '/api/info').then(r=>r.json()).then(d=>{
@@ -400,6 +422,14 @@ function renderSlots(slots){
   document.getElementById('slots-wrap').innerHTML=html;
 }
 
+function pickType(type){
+  sel.serviceType = type;
+  document.getElementById('type-inshop').classList.toggle('sel', type==='inshop');
+  document.getElementById('type-mobile').classList.toggle('sel', type==='mobile');
+  document.getElementById('address-field').style.display = type==='mobile' ? 'block' : 'none';
+  if(type==='inshop') document.getElementById('inp-address').value='';
+}
+
 function pickSlot(t){
   sel.time=t;
   document.querySelectorAll('.slot:not(.booked)').forEach(function(el){
@@ -430,6 +460,7 @@ function updateDetailSummary(){
     '<div class="ds-title">Booking Summary</div>'+
     '<div class="ds-row"><span class="ds-lbl">Service</span><span class="ds-val">'+sel.service.name+'</span></div>'+
     '<div class="ds-row"><span class="ds-lbl">Duration</span><span class="ds-val">'+sel.service.duration+' min</span></div>'+
+    '<div class="ds-row"><span class="ds-lbl">Type</span><span class="ds-val">'+(sel.serviceType==='mobile'?'🚗 Mobile':'📍 In-Shop')+'</span></div>'+
     '<div class="ds-row"><span class="ds-lbl">Date</span><span class="ds-val">'+fmtDate(sel.date)+'</span></div>'+
     '<div class="ds-row"><span class="ds-lbl">Time</span><span class="ds-val">'+(sel.time?fmt12(sel.time):'—')+'</span></div>'+
     '<div class="ds-row"><span class="ds-lbl">Total</span><span class="ds-val ds-total">$'+sel.service.price+'</span></div>';
@@ -456,9 +487,11 @@ function goStep(n){
 async function confirmBooking(){
   var name=document.getElementById('inp-name').value.trim();
   var phone=document.getElementById('inp-phone').value.trim();
+  var address=document.getElementById('inp-address').value.trim();
   document.getElementById('inp-name').classList.toggle('err',!name);
   document.getElementById('inp-phone').classList.toggle('err',!phone);
-  if(!name||!phone) return;
+  if(sel.serviceType==='mobile') document.getElementById('inp-address').classList.toggle('err',!address);
+  if(!name||!phone||(sel.serviceType==='mobile'&&!address)) return;
   var btn=document.getElementById('btn-confirm');
   document.getElementById('conf-txt').textContent='Confirming…';
   btn.disabled=true;
@@ -468,6 +501,7 @@ async function confirmBooking(){
       body:JSON.stringify({
         serviceId:sel.service.id, serviceName:sel.service.name, servicePrice:sel.service.price,
         date:sel.date, time:sel.time, customerName:name, phone:phone,
+        serviceType:sel.serviceType, address:sel.serviceType==='mobile'?address:null,
         email:document.getElementById('inp-email').value.trim(),
         notes:document.getElementById('inp-notes').value.trim()
       })
@@ -488,6 +522,8 @@ function showDone(b){
   document.getElementById('done-detail').innerHTML=
     '<div class="done-row"><span class="done-lbl">Booking ID</span><span class="done-val" style="font-size:11px;font-family:monospace">'+b.id+'</span></div>'+
     '<div class="done-row"><span class="done-lbl">Service</span><span class="done-val">'+b.serviceName+'</span></div>'+
+    '<div class="done-row"><span class="done-lbl">Type</span><span class="done-val">'+(b.serviceType==='mobile'?'🚗 Mobile':'📍 In-Shop')+'</span></div>'+
+    (b.address?'<div class="done-row"><span class="done-lbl">Address</span><span class="done-val">'+b.address+'</span></div>':'')+
     '<div class="done-row"><span class="done-lbl">Date</span><span class="done-val">'+longDate+'</span></div>'+
     '<div class="done-row"><span class="done-lbl">Time</span><span class="done-val">'+fmt12(b.time)+'</span></div>'+
     '<div class="done-row"><span class="done-lbl">Total</span><span class="done-val" style="color:var(--green)">$'+b.price+'</span></div>';
@@ -497,8 +533,11 @@ function showDone(b){
 }
 
 function reset(){
-  sel={service:null,date:null,time:null};
-  ['inp-name','inp-phone','inp-email','inp-notes'].forEach(function(id){ document.getElementById(id).value=''; });
+  sel={service:null,date:null,time:null,serviceType:'inshop'};
+  ['inp-name','inp-phone','inp-address','inp-email','inp-notes'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('address-field').style.display='none';
+  document.getElementById('type-inshop').classList.add('sel');
+  document.getElementById('type-mobile').classList.remove('sel');
   document.getElementById('conf-txt').textContent='Confirm Booking';
   document.getElementById('btn-confirm').disabled=false;
   document.getElementById('sel-bar').style.display='none';

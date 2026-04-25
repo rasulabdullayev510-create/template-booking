@@ -57,8 +57,9 @@ async function sendSMS(to, body) {
 
 async function sendOwnerNotification(booking) {
   if (!OWNER_PHONE) return;
+  const typeLabel = booking.serviceType === "mobile" ? `Mobile — ${booking.address}` : "In-Shop";
   await sendSMS(OWNER_PHONE,
-    `${booking.customerName} booked an appointment for ${booking.serviceName} on ${booking.date} at ${formatTime(booking.time)}.`
+    `${booking.customerName} booked ${booking.serviceName} on ${booking.date} at ${formatTime(booking.time)}. ${typeLabel}. Phone: ${booking.phone}`
   );
 }
 
@@ -203,7 +204,7 @@ app.get("/api/availability", (req, res) => {
 });
 
 app.post("/api/bookings", async (req, res) => {
-  const { serviceId, serviceName, servicePrice, date, time, customerName, email, notes } = req.body;
+  const { serviceId, serviceName, servicePrice, date, time, customerName, email, notes, serviceType, address } = req.body;
   let phone = (req.body.phone || "").toString().replace(/[^0-9+]/g, "");
   if (phone.length === 10) phone = "+1" + phone;
   else if (phone.length === 11 && phone[0] === "1") phone = "+" + phone;
@@ -222,6 +223,7 @@ app.post("/api/bookings", async (req, res) => {
     servicePrice: Number(servicePrice) || 0,
     date, time, customerName, phone,
     email: email || null, notes: notes || null,
+    serviceType: serviceType || "inshop", address: address || null,
     status: "confirmed",
     reviewToken: generateToken(), reviewSentAt: null,
     createdAt: new Date().toISOString(),
@@ -235,7 +237,7 @@ app.post("/api/bookings", async (req, res) => {
 
   res.json({
     success: true, bookingId: booking.id,
-    booking: { id: booking.id, serviceName: booking.serviceName, date, time, price: booking.servicePrice, customerName },
+    booking: { id: booking.id, serviceName: booking.serviceName, date, time, price: booking.servicePrice, customerName, serviceType: booking.serviceType, address: booking.address },
   });
 });
 
