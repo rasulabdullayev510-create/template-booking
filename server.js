@@ -188,19 +188,16 @@ app.get("/api/availability", (req, res) => {
   if (dayBlocked) return res.json({ date, slots: [], dayBlocked: true });
 
   const slots = [];
-  for (let hr = startH; hr <= endH; hr++) {
-    for (let m of [0, 30]) {
-      if (hr === endH && m === 30) continue;
-      const timeStr = String(hr).padStart(2, "0") + ":" + String(m).padStart(2, "0");
-      if (date === todayStr) {
-        const slotTime = new Date(date + "T" + timeStr + ":00");
-        if (slotTime < oneHourFromNow) continue;
-      }
-      let status = "available";
-      if (booked.includes(timeStr)) status = "booked";
-      else if (blockedTimes.includes(timeStr)) status = "blocked";
-      slots.push({ time: timeStr, status });
+  for (let hr = startH; hr < endH; hr++) {
+    const timeStr = String(hr).padStart(2, "0") + ":00";
+    if (date === todayStr) {
+      const slotTime = new Date(date + "T" + timeStr + ":00");
+      if (slotTime < oneHourFromNow) continue;
     }
+    let status = "available";
+    if (booked.includes(timeStr)) status = "booked";
+    else if (blockedTimes.includes(timeStr)) status = "blocked";
+    slots.push({ time: timeStr, status });
   }
   res.json({ date, slots });
 });
