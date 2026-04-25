@@ -365,7 +365,7 @@ app.get("/api/bookings", (req, res) => {
   res.json(db.get("bookings").value().reverse());
 });
 
-app.post("/api/review", (req, res) => {
+app.post("/api/review", async (req, res) => {
   const { token, rating, comment } = req.body;
   if (!token || !rating) return res.status(400).json({ error: "token and rating required" });
 
