@@ -548,9 +548,12 @@ function showDone(b){
     '<div class="done-row"><span class="done-lbl">Date</span><span class="done-val">'+longDate+'</span></div>'+
     '<div class="done-row"><span class="done-lbl">Time</span><span class="done-val">'+fmt12(b.time)+'</span></div>'+
     '<div class="done-row"><span class="done-lbl">Total</span><span class="done-val" style="color:var(--green)">$'+b.price+'</span></div>'+
-    '<div style="display:flex;gap:10px;justify-content:center;padding-top:16px;flex-wrap:wrap">'+
-      '<a href="'+googleUrl+'" target="_blank" style="'+calBtnStyle+'">📅 Google Calendar</a>'+
-      '<a href="'+icsUrl+'" download="appointment.ics" style="'+calBtnStyle+'">🍎 Apple Calendar</a>'+
+    '<div style="padding-top:16px;text-align:center">'+
+      '<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:10px">Add to Calendar</div>'+
+      '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'+
+        '<a href="'+googleUrl+'" target="_blank" style="'+calBtnStyle+'">📅 Google Calendar</a>'+
+        '<a href="'+icsUrl+'" download="appointment.ics" style="'+calBtnStyle+'">🍎 Apple Calendar</a>'+
+      '</div>'+
     '</div>';
   document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
   document.getElementById('panel-done').classList.add('active');
