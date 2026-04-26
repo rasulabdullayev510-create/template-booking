@@ -218,9 +218,9 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
   <!-- Step 1: Service -->
   <div class="panel active" id="panel-1">
     <div class="panel-hdr">
-      <div class="panel-eyebrow">Step 1 of 3</div>
-      <div class="panel-title">What do you need?</div>
-      <p class="panel-sub">Pick a service below. No payment needed until after your appointment.</p>
+      <div class="panel-eyebrow" id="p1-eyebrow">Step 1 of 3</div>
+      <div class="panel-title" id="p1-title">What do you need?</div>
+      <p class="panel-sub" id="p1-sub">Pick a service below. No payment needed until after your appointment.</p>
     </div>
     <div class="svc-list" id="svc-list">
       <div class="spin-row"><div class="spin-d"></div><div class="spin-d"></div><div class="spin-d"></div></div>
@@ -290,6 +290,7 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
       <div class="field form-full"><label>Notes</label><textarea id="inp-notes" placeholder="Anything we should know..."></textarea></div>
     </div>
     <p style="font-size:12px;color:var(--ink3);line-height:1.65;margin-top:16px">You'll get a confirmation text immediately, and a quick follow-up after your service.</p>
+    <button id="btn-add-svc" onclick="addAnotherService()" style="width:100%;margin-top:20px;padding:13px;border-radius:999px;border:2px solid var(--primary);background:transparent;color:var(--primary);font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.15s">+ Add Another Service</button>
     <div class="btn-row">
       <button class="btn-back" onclick="goStep(2)">← Back</button>
       <button class="btn-prime" id="btn-confirm" onclick="confirmBooking()"><span id="conf-txt">Confirm Booking</span></button>
@@ -313,9 +314,10 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
 
 <script>
 const API = window.location.origin;
-let services = [], sel = { service:null, date:null, time:null, serviceType:'inshop' };
+let services = [], sel = { service:null, date:null, time:null, serviceType:'inshop', additionalServices:[] };
 let calMo = new Date(); calMo.setDate(1);
 let businessName = '';
+var addingMode = false;
 
 fetch(API + '/api/info').then(r=>r.json()).then(d=>{
   businessName = d.businessName || '';
@@ -339,13 +341,27 @@ async function loadServices() {
 }
 
 function renderSvcs() {
+  if (addingMode) {
+    document.getElementById('p1-eyebrow').textContent = 'Add a Service';
+    document.getElementById('p1-title').textContent = 'Add another service.';
+    document.getElementById('p1-sub').textContent = 'Pick a service to add to your booking.';
+  } else {
+    document.getElementById('p1-eyebrow').textContent = 'Step 1 of 3';
+    document.getElementById('p1-title').textContent = 'What do you need?';
+    document.getElementById('p1-sub').textContent = 'Pick a service below. No payment needed until after your appointment.';
+  }
   document.getElementById('svc-list').innerHTML = services.map(function(s) {
-    var isSel = sel.service && sel.service.id === s.id;
-    return '<div class="svc-card' + (isSel ? ' sel' : '') + '" onclick="pickSvc(\'' + s.id + '\')">' +
+    var isPrimary = sel.service && sel.service.id === s.id;
+    var isAdded   = sel.additionalServices.some(function(a){ return a.id === s.id; });
+    var inCart    = isPrimary || isAdded;
+    var isSel     = !addingMode && isPrimary;
+    var disabled  = addingMode && inCart;
+    return '<div class="svc-card' + (isSel ? ' sel' : '') + '"' +
+      (disabled ? ' style="opacity:0.45;pointer-events:none"' : ' onclick="pickSvc(\'' + s.id + '\')"') + '>' +
       '<div class="svc-icon-wrap">' + (s.icon || '✦') + '</div>' +
       '<div class="svc-info">' +
         '<div class="svc-cat">' + (s.category || 'service') + '</div>' +
-        '<div class="svc-name">' + s.name + '</div>' +
+        '<div class="svc-name">' + s.name + (disabled ? ' <span style="font-size:10px;background:var(--primary-light);color:var(--primary);padding:2px 7px;border-radius:5px;font-weight:700;vertical-align:middle">✓ Added</span>' : '') + '</div>' +
         '<div class="svc-desc">' + s.description + '</div>' +
       '</div>' +
       '<div class="svc-price-wrap"><div class="svc-price">$' + s.price + '</div><div class="svc-dur">' + s.duration + ' min</div></div>' +
@@ -354,10 +370,34 @@ function renderSvcs() {
 }
 
 function pickSvc(id) {
-  sel.service = services.find(function(s){ return s.id === id; }) || null;
-  sel.date = null; sel.time = null;
+  var svc = services.find(function(s){ return s.id === id; }) || null;
+  if (addingMode) {
+    addingMode = false;
+    if (svc) {
+      var alreadyIn = (sel.service && sel.service.id === svc.id) ||
+                      sel.additionalServices.some(function(s){ return s.id === svc.id; });
+      if (!alreadyIn) sel.additionalServices.push(svc);
+    }
+    renderSvcs();
+    setTimeout(function(){ goStep(3); }, 220);
+  } else {
+    sel.service = svc;
+    sel.additionalServices = [];
+    sel.date = null; sel.time = null;
+    renderSvcs();
+    setTimeout(function(){ goStep(2); }, 220);
+  }
+}
+
+function addAnotherService() {
+  addingMode = true;
   renderSvcs();
-  setTimeout(function(){ goStep(2); }, 220);
+  goStep(1);
+}
+
+function removeAdditionalService(i) {
+  sel.additionalServices.splice(i, 1);
+  updateDetailSummary();
 }
 
 function renderCal() {
@@ -459,14 +499,24 @@ function updateSelBar(){
 
 function updateDetailSummary(){
   if(!sel.service) return;
+  var allSvcs = [sel.service].concat(sel.additionalServices);
+  var totalPrice = allSvcs.reduce(function(s,sv){ return s+sv.price; }, 0);
+  var totalDur   = allSvcs.reduce(function(s,sv){ return s+sv.duration; }, 0);
+  var svcRows = '<div class="ds-row"><span class="ds-lbl">Service</span><span class="ds-val">'+sel.service.name+'</span></div>';
+  for (var i=0; i<sel.additionalServices.length; i++) {
+    var sv = sel.additionalServices[i];
+    svcRows += '<div class="ds-row"><span class="ds-lbl" style="color:var(--primary)">+ Add-on</span>'+
+      '<span class="ds-val" style="display:flex;align-items:center;gap:8px">'+sv.name+' · $'+sv.price+
+      ' <button onclick="removeAdditionalService('+i+')" style="background:var(--red-light);color:var(--red);border:none;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;line-height:1">×</button></span></div>';
+  }
   document.getElementById('detail-summary').innerHTML=
     '<div class="ds-title">Booking Summary</div>'+
-    '<div class="ds-row"><span class="ds-lbl">Service</span><span class="ds-val">'+sel.service.name+'</span></div>'+
-    '<div class="ds-row"><span class="ds-lbl">Duration</span><span class="ds-val">'+sel.service.duration+' min</span></div>'+
+    svcRows+
+    '<div class="ds-row"><span class="ds-lbl">Duration</span><span class="ds-val">'+totalDur+' min est.</span></div>'+
     '<div class="ds-row"><span class="ds-lbl">Type</span><span class="ds-val">'+(sel.serviceType==='mobile'?'🚗 Mobile':'📍 In-Shop')+'</span></div>'+
     '<div class="ds-row"><span class="ds-lbl">Date</span><span class="ds-val">'+fmtDate(sel.date)+'</span></div>'+
     '<div class="ds-row"><span class="ds-lbl">Time</span><span class="ds-val">'+(sel.time?fmt12(sel.time):'—')+'</span></div>'+
-    '<div class="ds-row"><span class="ds-lbl">Total</span><span class="ds-val ds-total">$'+sel.service.price+'</span></div>';
+    '<div class="ds-row"><span class="ds-lbl">Total</span><span class="ds-val ds-total">$'+totalPrice+'</span></div>';
 }
 
 function goStep(n){
@@ -499,10 +549,13 @@ async function confirmBooking(){
   document.getElementById('conf-txt').textContent='Confirming…';
   btn.disabled=true;
   try{
+    var allSvcs=[sel.service].concat(sel.additionalServices);
+    var totalPrice=allSvcs.reduce(function(s,sv){return s+sv.price;},0);
+    var serviceNames=allSvcs.map(function(sv){return sv.name;}).join(' + ');
     var r=await fetch(API+'/api/bookings',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        serviceId:sel.service.id, serviceName:sel.service.name, servicePrice:sel.service.price,
+        serviceId:sel.service.id, serviceName:serviceNames, servicePrice:totalPrice,
         date:sel.date, time:sel.time, customerName:name, phone:phone,
         serviceType:sel.serviceType, address:sel.serviceType==='mobile'?address:null,
         email:document.getElementById('inp-email').value.trim(),
@@ -562,10 +615,16 @@ function showDone(b){
 
 async function checkReturning(field, value) {
   var banner = document.getElementById('welcome-back');
-  if (!value || value.trim().length < 3) { banner.style.display='none'; return; }
-  var param = field==='phone' ? 'phone='+encodeURIComponent(value.trim())
-            : field==='email' ? 'email='+encodeURIComponent(value.trim())
-            : 'name='+encodeURIComponent(value.trim());
+  // Only match on phone or email (unique identifiers) — name alone is not reliable
+  var phone = document.getElementById('inp-phone').value.trim();
+  var email = document.getElementById('inp-email').value.trim();
+  var param = null;
+  if (phone && phone.replace(/\D/g,'').length >= 10) {
+    param = 'phone='+encodeURIComponent(phone);
+  } else if (email && email.includes('@')) {
+    param = 'email='+encodeURIComponent(email);
+  }
+  if (!param) { banner.style.display='none'; return; }
   try {
     var r = await fetch(API+'/api/returning?'+param);
     var d = await r.json();
@@ -573,14 +632,15 @@ async function checkReturning(field, value) {
       banner.style.display='block';
       banner.textContent='👋 Welcome back, '+d.customerName+'! Great to see you again.';
       var nameF=document.getElementById('inp-name'), emailF=document.getElementById('inp-email');
-      if (field!=='name' && d.customerName && !nameF.value) nameF.value=d.customerName;
-      if (field!=='email' && d.email && !emailF.value) emailF.value=d.email;
+      if (d.customerName && !nameF.value) nameF.value=d.customerName;
+      if (d.email && !emailF.value) emailF.value=d.email;
     } else { banner.style.display='none'; }
   } catch(e) { banner.style.display='none'; }
 }
 
 function reset(){
-  sel={service:null,date:null,time:null,serviceType:'inshop'};
+  sel={service:null,date:null,time:null,serviceType:'inshop',additionalServices:[]};
+  addingMode=false;
   ['inp-name','inp-phone','inp-address','inp-email','inp-notes'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('welcome-back').style.display='none';
   document.getElementById('address-field').style.display='none';
