@@ -89,6 +89,17 @@ async function sendOwnerFeedbackAlert(feedbackEntry, record) {
 }
 
 
+async function sendReminderSMS(booking) {
+  const firstName  = booking.customerName.split(" ")[0];
+  const isMobile   = booking.serviceType === "mobile";
+  const locationMsg = isMobile && booking.address
+    ? `We'll be coming to: ${booking.address}`
+    : "See you at the shop!";
+  await sendSMS(booking.phone,
+    `Hey ${firstName}! Quick reminder — your ${booking.serviceName} is today at ${formatTime(booking.time)} with ${BUSINESS_NAME}. ${locationMsg} — ${BUSINESS_NAME}`
+  );
+}
+
 async function sendReviewSMS(phone, customerName, token) {
   await sendSMS(phone,
     `Hey ${customerName}! Hope those headlights are looking crystal clear 💡 Would mean a lot if you took 20 seconds to let us know how we did: ${getSurveyUrl(token)} — ClearVision Auto`
@@ -225,7 +236,7 @@ app.post("/api/bookings", async (req, res) => {
     email: email || null, notes: notes || null,
     serviceType: serviceType || "inshop", address: address || null,
     status: "confirmed",
-    reviewToken: generateToken(), reviewSentAt: null,
+    reviewToken: generateToken(), reviewSentAt: null, reminderSentAt: null,
     createdAt: new Date().toISOString(),
   };
 
@@ -340,7 +351,7 @@ app.post("/api/manual-entry", async (req, res) => {
     status: "confirmed",
     source: "manual",
     reviewDelayMinutes,
-    reviewToken: generateToken(), reviewSentAt: null,
+    reviewToken: generateToken(), reviewSentAt: null, reminderSentAt: null,
     createdAt: new Date().toISOString(),
   };
 
@@ -363,6 +374,27 @@ app.post("/api/manual-entry", async (req, res) => {
 app.get("/api/bookings", (req, res) => {
   if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
   res.json(db.get("bookings").value().reverse());
+});
+
+app.post("/api/bookings/:id/noshow", (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  const booking = db.get("bookings").find({ id: req.params.id }).value();
+  if (!booking) return res.status(404).json({ error: "Not found" });
+  db.get("bookings").find({ id: req.params.id }).assign({ status: "noshow" }).write();
+  res.json({ success: true });
+});
+
+app.post("/api/winback", async (req, res) => {
+  if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
+  const { phone, customerName } = req.body;
+  if (!phone || !customerName) return res.status(400).json({ error: "phone and customerName required" });
+  const firstName = customerName.split(" ")[0];
+  try {
+    await sendSMS(phone,
+      `Hey ${firstName}! It's been a while since your last visit at ${BUSINESS_NAME}. Ready for your next appointment? Book in 30 seconds: ${BOOKING_PAGE_URL}`
+    );
+    res.json({ success: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post("/api/review", async (req, res) => {
@@ -475,6 +507,30 @@ cron.schedule("* * * * *", async () => {
       db.get("walkins").find({ id: w.id }).assign({ reviewSentAt: now.toISOString() }).write();
       console.log(`✓ Review SMS → ${w.customerName} (walk-in)`);
     } catch (err) { console.error(`✗ Review SMS failed:`, err.message); }
+  }
+});
+
+// ── Cron: appointment reminders (3 hours before) ─────────────
+
+cron.schedule("*/15 * * * *", async () => {
+  const localDate = new Date().toLocaleDateString("en-CA", { timeZone: TIMEZONE });
+  const localTime = new Date().toLocaleTimeString("en-US", { timeZone: TIMEZONE, hour12: false, hour: "2-digit", minute: "2-digit" });
+  const nowLocal  = new Date(`${localDate}T${localTime}:00`);
+
+  const reminders = db.get("bookings").filter(b => {
+    if (b.status !== "confirmed" || b.reminderSentAt || !b.phone) return false;
+    if (!b.time || b.time === "00:00") return false;
+    const apptLocal  = new Date(`${b.date}T${b.time}:00`);
+    const minsUntil  = (apptLocal - nowLocal) / (1000 * 60);
+    return minsUntil >= 165 && minsUntil < 195; // 2h45m – 3h15m window
+  }).value();
+
+  for (const b of reminders) {
+    try {
+      await sendReminderSMS(b);
+      db.get("bookings").find({ id: b.id }).assign({ reminderSentAt: new Date().toISOString() }).write();
+      console.log(`✓ Reminder SMS → ${b.customerName}`);
+    } catch(err) { console.error(`✗ Reminder SMS:`, err.message); }
   }
 });
 

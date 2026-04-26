@@ -314,9 +314,11 @@ body{background:var(--bg);color:var(--ink);font-family:'Plus Jakarta Sans',sans-
 const API = window.location.origin;
 let services = [], sel = { service:null, date:null, time:null, serviceType:'inshop' };
 let calMo = new Date(); calMo.setDate(1);
+let businessName = '';
 
 fetch(API + '/api/info').then(r=>r.json()).then(d=>{
-  document.getElementById('topbar-name').textContent = d.businessName || '';
+  businessName = d.businessName || '';
+  document.getElementById('topbar-name').textContent = businessName;
   var t = 'Book an Appointment' + (d.businessName ? ' — ' + d.businessName : '');
   document.title = t;
   document.getElementById('booking-title').textContent = t;
@@ -515,10 +517,28 @@ async function confirmBooking(){
   }
 }
 
+function calDT(dateStr, timeStr, addMins) {
+  var parts=dateStr.split('-').map(Number), tp=timeStr.split(':').map(Number);
+  var totalMins=tp[0]*60+tp[1]+(addMins||0);
+  var h=Math.floor(totalMins/60)%24, m=totalMins%60;
+  var dayAdd=Math.floor(totalMins/(24*60));
+  var dd=new Date(parts[0],parts[1]-1,parts[2]+dayAdd);
+  return ''+dd.getFullYear()+String(dd.getMonth()+1).padStart(2,'0')+String(dd.getDate()).padStart(2,'0')+'T'+String(h).padStart(2,'0')+String(m).padStart(2,'0')+'00';
+}
+
 function showDone(b){
   var p=b.date.split('-');
   var ms=['January','February','March','April','May','June','July','August','September','October','November','December'];
   var longDate=ms[parseInt(p[1])-1]+' '+parseInt(p[2])+', '+p[0];
+  var dur=(sel.service&&sel.service.duration)||60;
+  var startDT=calDT(b.date,b.time,0);
+  var endDT=calDT(b.date,b.time,dur);
+  var title=encodeURIComponent((b.serviceName||'Appointment')+' at '+businessName);
+  var loc=encodeURIComponent(b.address||businessName);
+  var googleUrl='https://calendar.google.com/calendar/render?action=TEMPLATE&text='+title+'&dates='+startDT+'/'+endDT+'&location='+loc;
+  var ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nDTSTART:'+startDT+'\r\nDTEND:'+endDT+'\r\nSUMMARY:'+(b.serviceName||'Appointment')+' at '+businessName+'\r\nLOCATION:'+(b.address||businessName)+'\r\nUID:'+b.id+'@booking\r\nEND:VEVENT\r\nEND:VCALENDAR';
+  var icsUrl='data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
+  var calBtnStyle='display:inline-flex;align-items:center;gap:7px;padding:11px 18px;border-radius:10px;border:1.5px solid var(--border2);background:var(--white);color:var(--ink);font-family:\'Plus Jakarta Sans\',sans-serif;font-size:13px;font-weight:700;text-decoration:none;transition:all 0.15s';
   document.getElementById('done-detail').innerHTML=
     '<div class="done-row"><span class="done-lbl">Booking ID</span><span class="done-val" style="font-size:11px;font-family:monospace">'+b.id+'</span></div>'+
     '<div class="done-row"><span class="done-lbl">Service</span><span class="done-val">'+b.serviceName+'</span></div>'+
@@ -526,7 +546,11 @@ function showDone(b){
     (b.address?'<div class="done-row"><span class="done-lbl">Address</span><span class="done-val">'+b.address+'</span></div>':'')+
     '<div class="done-row"><span class="done-lbl">Date</span><span class="done-val">'+longDate+'</span></div>'+
     '<div class="done-row"><span class="done-lbl">Time</span><span class="done-val">'+fmt12(b.time)+'</span></div>'+
-    '<div class="done-row"><span class="done-lbl">Total</span><span class="done-val" style="color:var(--green)">$'+b.price+'</span></div>';
+    '<div class="done-row"><span class="done-lbl">Total</span><span class="done-val" style="color:var(--green)">$'+b.price+'</span></div>'+
+    '<div style="display:flex;gap:10px;justify-content:center;padding-top:16px;flex-wrap:wrap">'+
+      '<a href="'+googleUrl+'" target="_blank" style="'+calBtnStyle+'">📅 Google Calendar</a>'+
+      '<a href="'+icsUrl+'" download="appointment.ics" style="'+calBtnStyle+'">🍎 Apple Calendar</a>'+
+    '</div>';
   document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
   document.getElementById('panel-done').classList.add('active');
   window.scrollTo({top:0,behavior:'smooth'});
