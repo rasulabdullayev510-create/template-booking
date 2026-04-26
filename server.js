@@ -320,7 +320,7 @@ app.post("/api/blocked/range", (req, res) => {
 
 app.post("/api/manual-entry", async (req, res) => {
   if (req.query.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
-  const { customerName, serviceName, servicePrice, date, notes } = req.body;
+  const { customerName, serviceName, servicePrice, date, notes, serviceType, address } = req.body;
   const reviewDelayMinutes = req.body.reviewDelayMinutes !== undefined ? Number(req.body.reviewDelayMinutes) : 720;
   let phone = (req.body.phone || "").toString().replace(/[^0-9+]/g, "");
   if (phone.length === 10) phone = "+1" + phone;
@@ -336,6 +336,7 @@ app.post("/api/manual-entry", async (req, res) => {
     time: "00:00",
     customerName, phone: phone || null,
     email: null, notes: notes || null,
+    serviceType: serviceType || "inshop", address: address || null,
     status: "confirmed",
     source: "manual",
     reviewDelayMinutes,
