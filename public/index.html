@@ -621,18 +621,26 @@ function showDone(b){
 
 async function checkReturning(field, value) {
   var banner = document.getElementById('welcome-back');
-  // Only match on phone or email (unique identifiers) — name alone is not reliable
+  var name  = document.getElementById('inp-name').value.trim();
   var phone = document.getElementById('inp-phone').value.trim();
   var email = document.getElementById('inp-email').value.trim();
-  var param = null;
-  if (phone && phone.replace(/\D/g,'').length >= 10) {
-    param = 'phone='+encodeURIComponent(phone);
-  } else if (email && email.includes('@')) {
-    param = 'email='+encodeURIComponent(email);
+
+  var hasPhone = phone && phone.replace(/\D/g,'').length >= 10;
+  var hasEmail = email && email.includes('@');
+  var hasName  = name  && name.length >= 2;
+
+  // Need at least 2 fields filled — server checks combinations
+  if ([hasPhone, hasEmail, hasName].filter(Boolean).length < 2) {
+    banner.style.display='none'; return;
   }
-  if (!param) { banner.style.display='none'; return; }
+
+  var params = [];
+  if (hasPhone) params.push('phone='+encodeURIComponent(phone));
+  if (hasEmail) params.push('email='+encodeURIComponent(email));
+  if (hasName)  params.push('name='+encodeURIComponent(name));
+
   try {
-    var r = await fetch(API+'/api/returning?'+param);
+    var r = await fetch(API+'/api/returning?'+params.join('&'));
     var d = await r.json();
     if (d.found) {
       banner.style.display='block';
